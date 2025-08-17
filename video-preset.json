@@ -1,0 +1,10 @@
+{
+  "videoCodec": "h264",
+  "audioCodec": "aac",
+  "resolution": "1920x1080",
+  "bitrate": 974,
+  "fps": 29.97,
+  "audioChannels": 2,
+  "audioSampleRate": 48000
+}
+

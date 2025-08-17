@@ -1,0 +1,248 @@
+name: Video Processing Pipeline
+
+on:
+  push:
+    paths:
+      - 'uploads/**'
+  workflow_dispatch:
+    inputs:
+      video_file:
+        description: 'Video file to process'
+        required: false
+        type: string
+
+jobs:
+  process-video:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Setup FFmpeg
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+        
+    - name: Create necessary directories
+      run: |
+        mkdir -p uploads processed thumbnails
+        
+    - name: Find uploaded videos
+      id: find-videos
+      run: |
+        if [ -d "uploads" ]; then
+          VIDEOS=$(find uploads -name "*.mp4" -o -name "*.avi" -o -name "*.mov" -o -name "*.mkv" -o -name "*.wmv" -o -name "*.flv" -o -name "*.webm")
+          echo "videos=$VIDEOS" >> $GITHUB_OUTPUT
+          echo "Found videos: $VIDEOS"
+        else
+          echo "videos=" >> $GITHUB_OUTPUT
+          echo "No uploads directory found"
+        fi
+        
+    - name: Process videos
+      if: steps.find-videos.outputs.videos != ''
+      run: |
+        # Load environment variables
+        if [ -f ".env" ]; then
+          export $(cat .env | grep -v '^#' | xargs)
+        fi
+        
+        # Process each video
+        for video in ${{ steps.find-videos.outputs.videos }}; do
+          echo "Processing video: $video"
+          
+          # Extract video ID from filename
+          VIDEO_ID=$(basename "$video" | sed 's/^video-\([0-9]*\)-.*/\1/')
+          
+          # Analyze video properties
+          echo "Analyzing video properties..."
+          node -e "
+            const VideoProcessor = require('./services/VideoProcessor');
+            const processor = new VideoProcessor();
+            
+            processor.analyzeVideo('$video')
+              .then(props => {
+                console.log('Video properties:', JSON.stringify(props, null, 2));
+              })
+              .catch(err => {
+                console.error('Error analyzing video:', err);
+                process.exit(1);
+              });
+          "
+          
+          # Process video with preset
+          echo "Processing video with preset..."
+          node -e "
+            const VideoProcessor = require('./services/VideoProcessor');
+            const processor = new VideoProcessor();
+            
+            processor.processVideo('$video', '$VIDEO_ID', (progress) => {
+              console.log('Processing progress:', progress + '%');
+            })
+              .then(result => {
+                console.log('Video processed successfully:', result);
+              })
+              .catch(err => {
+                console.error('Error processing video:', err);
+                process.exit(1);
+              });
+          "
+          
+          # Generate thumbnail
+          echo "Generating thumbnail..."
+          node -e "
+            const VideoProcessor = require('./services/VideoProcessor');
+            const processor = new VideoProcessor();
+            
+            processor.generateThumbnail('$video', '$VIDEO_ID', 2)
+              .then(thumbnailPath => {
+                console.log('Thumbnail generated:', thumbnailPath);
+              })
+              .catch(err => {
+                console.error('Error generating thumbnail:', err);
+                process.exit(1);
+              });
+          "
+        done
+        
+    - name: Upload to ImageKit
+      if: steps.find-videos.outputs.videos != ''
+      run: |
+        # Load environment variables
+        if [ -f ".env" ]; then
+          export $(cat .env | grep -v '^#' | xargs)
+        fi
+        
+        # Upload processed videos and thumbnails
+        node -e "
+          const ImageKitService = require('./services/ImageKitService');
+          const fs = require('fs-extra');
+          const path = require('path');
+          
+          const imageKit = new ImageKitService();
+          
+          async function uploadFiles() {
+            try {
+              // Find processed videos
+              const processedVideos = await fs.readdir('processed');
+              const thumbnails = await fs.readdir('thumbnails');
+              
+              const files = [];
+              
+              // Add processed videos
+              for (const video of processedVideos) {
+                if (video.endsWith('.mp4')) {
+                  files.push({
+                    path: path.join('processed', video),
+                    type: 'video'
+                  });
+                }
+              }
+              
+              // Add thumbnails
+              for (const thumbnail of thumbnails) {
+                if (thumbnail.endsWith('.jpg')) {
+                  files.push({
+                    path: path.join('thumbnails', thumbnail),
+                    type: 'image'
+                  });
+                }
+              }
+              
+              console.log('Uploading files:', files);
+              
+              const results = await imageKit.uploadFiles(files, (progress) => {
+                console.log('Upload progress:', progress + '%');
+              });
+              
+              console.log('Upload results:', JSON.stringify(results, null, 2));
+              
+              // Save results to a file for the next step
+              await fs.writeJson('upload-results.json', results);
+              
+            } catch (error) {
+              console.error('Error uploading files:', error);
+              process.exit(1);
+            }
+          }
+          
+          uploadFiles();
+        "
+        
+    - name: Update results file
+      if: steps.find-videos.outputs.videos != ''
+      run: |
+        # Create or update results file with URLs
+        if [ -f "upload-results.json" ]; then
+          RESULTS=$(cat upload-results.json)
+          echo "Video processing completed successfully!"
+          echo "Results: $RESULTS"
+          
+          # Save results to a permanent location
+          echo "$RESULTS" > results/video-results.json
+        else
+          echo "No upload results found"
+        fi
+        
+    - name: Cleanup original files
+      if: steps.find-videos.outputs.videos != ''
+      run: |
+        # Remove original uploaded files
+        if [ -d "uploads" ]; then
+          rm -rf uploads/*
+          echo "Original files cleaned up"
+        fi
+        
+    - name: Commit results
+      if: steps.find-videos.outputs.videos != ''
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add results/
+        git commit -m "Add video processing results" || echo "No changes to commit"
+        git push
+        
+    - name: Create issue with results
+      if: steps.find-videos.outputs.videos != ''
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          
+          let results = {};
+          try {
+            results = JSON.parse(fs.readFileSync('upload-results.json', 'utf8'));
+          } catch (error) {
+            console.log('No results file found');
+          }
+          
+          const issueBody = `
+          ## Video Processing Completed ✅
+          
+          **Processed Videos:** ${Object.keys(results).length}
+          
+          ${results.videoUrl ? `**Main Video URL:** ${results.videoUrl}` : ''}
+          ${results.thumbnailUrl ? `**Thumbnail URL:** ${results.thumbnailUrl}` : ''}
+          ${results.videoParts && results.videoParts.length > 0 ? `**Video Parts:** ${results.videoParts.join(', ')}` : ''}
+          
+          ---
+          *This issue was automatically created by the video processing workflow.*
+          `;
+          
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: 'Video Processing Results',
+            body: issueBody,
+            labels: ['video-processing', 'automated']
+          });
