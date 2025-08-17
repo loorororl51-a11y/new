@@ -51,11 +51,12 @@ jobs:
         
     - name: Process videos
       if: steps.find-videos.outputs.videos != ''
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        IMAGEKIT_PUBLIC_KEY: ${{ secrets.IMAGEKIT_PUBLIC_KEY }}
+        IMAGEKIT_PRIVATE_KEY: ${{ secrets.IMAGEKIT_PRIVATE_KEY }}
+        IMAGEKIT_URL_ENDPOINT: ${{ secrets.IMAGEKIT_URL_ENDPOINT }}
       run: |
-        # Load environment variables
-        if [ -f ".env" ]; then
-          export $(cat .env | grep -v '^#' | xargs)
-        fi
         
         # Process each video
         for video in ${{ steps.find-videos.outputs.videos }}; do
@@ -117,11 +118,12 @@ jobs:
         
     - name: Upload to ImageKit
       if: steps.find-videos.outputs.videos != ''
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        IMAGEKIT_PUBLIC_KEY: ${{ secrets.IMAGEKIT_PUBLIC_KEY }}
+        IMAGEKIT_PRIVATE_KEY: ${{ secrets.IMAGEKIT_PRIVATE_KEY }}
+        IMAGEKIT_URL_ENDPOINT: ${{ secrets.IMAGEKIT_URL_ENDPOINT }}
       run: |
-        # Load environment variables
-        if [ -f ".env" ]; then
-          export $(cat .env | grep -v '^#' | xargs)
-        fi
         
         # Upload processed videos and thumbnails
         node -e "
