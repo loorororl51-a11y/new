@@ -10,6 +10,10 @@ on:
         description: 'Video file to process'
         required: false
         type: string
+      video_id:
+        description: 'Video ID associated with the upload'
+        required: false
+        type: string
 
 jobs:
   process-video:
@@ -37,19 +41,25 @@ jobs:
       run: |
         mkdir -p uploads processed thumbnails
         
-    - name: Find uploaded videos
+    - name: Find uploaded videos (repo push) or use provided URL (dispatch)
       id: find-videos
       run: |
-        if [ -d "uploads" ]; then
-          VIDEOS=$(find uploads -name "*.mp4" -o -name "*.avi" -o -name "*.mov" -o -name "*.mkv" -o -name "*.wmv" -o -name "*.flv" -o -name "*.webm")
-          echo "videos=$VIDEOS" >> $GITHUB_OUTPUT
-          echo "Found videos: $VIDEOS"
+        VIDEOS=""
+        if [ -n "${{ github.event.inputs.video_file }}" ]; then
+          echo "Using workflow_dispatch URL: ${{ github.event.inputs.video_file }}"
+          echo "videos=${{ github.event.inputs.video_file }}" >> $GITHUB_OUTPUT
         else
-          echo "videos=" >> $GITHUB_OUTPUT
-          echo "No uploads directory found"
+          if [ -d "uploads" ]; then
+            VIDEOS=$(find uploads -name "*.mp4" -o -name "*.avi" -o -name "*.mov" -o -name "*.mkv" -o -name "*.wmv" -o -name "*.flv" -o -name "*.webm")
+            echo "videos=$VIDEOS" >> $GITHUB_OUTPUT
+            echo "Found videos: $VIDEOS"
+          else
+            echo "videos=" >> $GITHUB_OUTPUT
+            echo "No uploads directory found"
+          fi
         fi
         
-    - name: Process videos
+    - name: Download if URL and process videos
       if: steps.find-videos.outputs.videos != ''
       env:
         GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -57,13 +67,24 @@ jobs:
         IMAGEKIT_PRIVATE_KEY: ${{ secrets.IMAGEKIT_PRIVATE_KEY }}
         IMAGEKIT_URL_ENDPOINT: ${{ secrets.IMAGEKIT_URL_ENDPOINT }}
       run: |
-        
-        # Process each video
+        mkdir -p uploads
+        # Process each video or URL
         for video in ${{ steps.find-videos.outputs.videos }}; do
           echo "Processing video: $video"
           
-          # Extract video ID from filename
+          # If 'video' looks like a URL, download it to uploads/
+          if echo "$video" | grep -qE '^https?://'; then
+            echo "Detected URL. Downloading..."
+            FILE_NAME="downloaded-$(date +%s).mp4"
+            curl -L "$video" -o "uploads/$FILE_NAME"
+            video="uploads/$FILE_NAME"
+          fi
+
+          # Extract video ID from filename or use input
           VIDEO_ID=$(basename "$video" | sed 's/^video-\([0-9]*\)-.*/\1/')
+          if [ -z "$VIDEO_ID" ] && [ -n "${{ github.event.inputs.video_id }}" ]; then
+            VIDEO_ID="${{ github.event.inputs.video_id }}"
+          fi
           
           # Analyze video properties
           echo "Analyzing video properties..."
@@ -188,6 +209,9 @@ jobs:
         for video in ${{ steps.find-videos.outputs.videos }}; do
           VIDEO_BASENAME=$(basename "$video")
           VIDEO_ID=$(echo "$VIDEO_BASENAME" | sed 's/^video-\([0-9]*\)-.*/\1/')
+          if [ -z "$VIDEO_ID" ] && [ -n "${{ github.event.inputs.video_id }}" ]; then
+            VIDEO_ID="${{ github.event.inputs.video_id }}"
+          fi
           if [ -f "upload-results.json" ]; then
             cp upload-results.json results/video-${VIDEO_ID}-results.json
             echo "Wrote results for ${VIDEO_ID}"

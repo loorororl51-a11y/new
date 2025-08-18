@@ -11,6 +11,7 @@ const VideoProcessor = require('./services/VideoProcessor');
 const ImageKitService = require('./services/ImageKitService');
 const WebSocketManager = require('./services/WebSocketManager');
 const GitHubService = require('./services/GitHubService');
+const GofileService = require('./services/GofileService');
 
 const app = express();
 const server = http.createServer(app);
@@ -69,6 +70,7 @@ const videoProcessor = new VideoProcessor();
 const imageKitService = new ImageKitService();
 const wsManager = new WebSocketManager(io);
 const githubService = new GitHubService();
+const gofileService = new GofileService();
 
 // Routes
 app.get('/', (req, res) => {
@@ -120,6 +122,33 @@ app.post('/upload', upload.single('video'), async (req, res) => {
         console.error('GitHub commit error:', err);
         wsManager.updateVideoStatus(videoInfo.id, 'error', 0, err.message);
         return res.status(500).json({ success: false, error: 'Failed to push video to GitHub' });
+      }
+    } else if (processingMode === 'gofile') {
+      // Upload to Gofile as guest, then trigger GH Action via workflow_dispatch
+      try {
+        const goRes = await gofileService.uploadAsGuest(videoInfo.path);
+        // Optionally remove local file after upload
+        await fs.remove(videoInfo.path).catch(() => {});
+
+        wsManager.updateVideoStatus(videoInfo.id, 'processing', 20);
+
+        // Trigger workflow with inputs
+        await githubService.triggerWorkflowDispatch('video-processing.yml', {
+          video_file: goRes.downloadPage,
+          video_id: videoInfo.id
+        });
+
+        res.json({
+          success: true,
+          videoId: videoInfo.id,
+          mode: 'gofile',
+          gofile: goRes,
+          message: 'Video uploaded to Gofile. GitHub Action triggered.'
+        });
+      } catch (err) {
+        console.error('Gofile/dispatch error:', err);
+        wsManager.updateVideoStatus(videoInfo.id, 'error', 0, err.message);
+        return res.status(500).json({ success: false, error: 'Failed to upload to Gofile or dispatch workflow' });
       }
     } else {
       // Local processing path (existing behavior)

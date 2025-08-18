@@ -256,6 +256,24 @@ ${error.stack || 'No stack trace available'}
     }
   }
 
+  // Trigger GitHub Actions workflow_dispatch with inputs
+  async triggerWorkflowDispatch(workflowFileName, inputs) {
+    try {
+      await this.octokit.actions.createWorkflowDispatch({
+        owner: this.owner,
+        repo: this.repo,
+        workflow_id: workflowFileName,
+        ref: this.branch,
+        inputs
+      });
+      console.log(`Workflow ${workflowFileName} dispatched with inputs:`, inputs);
+      return true;
+    } catch (error) {
+      console.error('Error triggering workflow dispatch:', error);
+      throw error;
+    }
+  }
+
   // Create or update a file using a local path into the repository (e.g., uploads/ folder)
   async commitLocalFileToRepo(localFilePath, repoPath, commitMessage) {
     try {

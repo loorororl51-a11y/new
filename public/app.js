@@ -107,7 +107,7 @@ async function uploadFile(file) {
             fileInput.value = ''; // Reset file input
 
             // If using GitHub processing mode, start polling for results from the repository
-            if (result.mode === 'github' && result.videoId) {
+            if ((result.mode === 'github' || result.mode === 'gofile') && result.videoId) {
                 startPollingResults(result.videoId);
             }
         } else {
