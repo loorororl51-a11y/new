@@ -11,7 +11,7 @@ const VideoProcessor = require('./services/VideoProcessor');
 const ImageKitService = require('./services/ImageKitService');
 const WebSocketManager = require('./services/WebSocketManager');
 const GitHubService = require('./services/GitHubService');
-const GofileService = require('./services/GofileService');
+const PixelDrainService = require('./services/PixelDrainService');
 
 const app = express();
 const server = http.createServer(app);
@@ -70,7 +70,7 @@ const videoProcessor = new VideoProcessor();
 const imageKitService = new ImageKitService();
 const wsManager = new WebSocketManager(io);
 const githubService = new GitHubService();
-const gofileService = new GofileService();
+const pixelDrainService = new PixelDrainService();
 
 // Routes
 app.get('/', (req, res) => {
@@ -123,20 +123,17 @@ app.post('/upload', upload.single('video'), async (req, res) => {
         wsManager.updateVideoStatus(videoInfo.id, 'error', 0, err.message);
         return res.status(500).json({ success: false, error: 'Failed to push video to GitHub' });
       }
-    } else if (processingMode === 'gofile') {
-      // Upload to Gofile as guest, then trigger GH Action via workflow_dispatch
+    } else if (processingMode === 'pixeldrain') {
       try {
-        const goRes = await gofileService.uploadAsGuest(videoInfo.path);
-        // Optionally remove local file after upload
+        const pd = await pixelDrainService.uploadFile(videoInfo.path);
         await fs.remove(videoInfo.path).catch(() => {});
 
         wsManager.updateVideoStatus(videoInfo.id, 'processing', 20);
 
-        // Optionally trigger workflow based on env flag
         const shouldDispatch = (process.env.DISPATCH_WORKFLOW || 'true').toLowerCase() === 'true';
         if (shouldDispatch) {
           await githubService.triggerWorkflowDispatch('video-processing.yml', {
-            video_file: goRes.downloadPage,
+            video_file: pd.directUrl,
             video_id: videoInfo.id
           });
         }
@@ -144,14 +141,14 @@ app.post('/upload', upload.single('video'), async (req, res) => {
         res.json({
           success: true,
           videoId: videoInfo.id,
-          mode: 'gofile',
-          gofile: goRes,
-          message: shouldDispatch ? 'Video uploaded to Gofile. GitHub Action triggered.' : 'Video uploaded to Gofile.'
+          mode: 'pixeldrain',
+          pixeldrain: pd,
+          message: shouldDispatch ? 'Video uploaded to PixelDrain. GitHub Action triggered.' : 'Video uploaded to PixelDrain.'
         });
       } catch (err) {
-        console.error('Gofile/dispatch error:', err);
+        console.error('PixelDrain/dispatch error:', err);
         wsManager.updateVideoStatus(videoInfo.id, 'error', 0, err.message);
-        return res.status(500).json({ success: false, error: 'Failed to upload to Gofile or dispatch workflow' });
+        return res.status(500).json({ success: false, error: 'Failed to upload to PixelDrain or dispatch workflow' });
       }
     } else {
       // Local processing path (existing behavior)

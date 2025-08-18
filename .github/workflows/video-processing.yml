@@ -66,6 +66,7 @@ jobs:
         IMAGEKIT_PUBLIC_KEY: ${{ secrets.IMAGEKIT_PUBLIC_KEY }}
         IMAGEKIT_PRIVATE_KEY: ${{ secrets.IMAGEKIT_PRIVATE_KEY }}
         IMAGEKIT_URL_ENDPOINT: ${{ secrets.IMAGEKIT_URL_ENDPOINT }}
+        PIXELDRAIN_API_TOKEN: ${{ secrets.PIXELDRAIN_API_TOKEN }}
       run: |
         mkdir -p uploads
         # Process each video or URL
@@ -75,6 +76,15 @@ jobs:
           # If 'video' looks like a URL, download it to uploads/
           if echo "$video" | grep -qE '^https?://'; then
             echo "Detected URL. Downloading..."
+            # Gofile support removed
+            # If it's a PixelDrain page URL, convert to direct download using its API format
+            if echo "$video" | grep -qE 'pixeldrain\.com/u/'; then
+              ID=$(echo "$video" | sed -n 's#.*pixeldrain\.com/u/\([A-Za-z0-9]*\).*#\1#p')
+              if [ -n "$ID" ]; then
+                video="https://pixeldrain.com/api/file/$ID?download"
+                echo "Resolved PixelDrain direct link"
+              fi
+            fi
             EXT=$(echo "$video" | sed -n 's/.*\(\.mp4\|\.webm\|\.mkv\|\.mov\|\.avi\|\.wmv\|\.flv\)$.*/\1/p')
             if [ -z "$EXT" ]; then EXT=.mp4; fi
             FILE_NAME="downloaded-$(date +%s)$EXT"
