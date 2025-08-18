@@ -132,18 +132,21 @@ app.post('/upload', upload.single('video'), async (req, res) => {
 
         wsManager.updateVideoStatus(videoInfo.id, 'processing', 20);
 
-        // Trigger workflow with inputs
-        await githubService.triggerWorkflowDispatch('video-processing.yml', {
-          video_file: goRes.directLink || goRes.downloadPage,
-          video_id: videoInfo.id
-        });
+        // Optionally trigger workflow based on env flag
+        const shouldDispatch = (process.env.DISPATCH_WORKFLOW || 'true').toLowerCase() === 'true';
+        if (shouldDispatch) {
+          await githubService.triggerWorkflowDispatch('video-processing.yml', {
+            video_file: goRes.downloadPage,
+            video_id: videoInfo.id
+          });
+        }
 
         res.json({
           success: true,
           videoId: videoInfo.id,
           mode: 'gofile',
           gofile: goRes,
-          message: 'Video uploaded to Gofile. GitHub Action triggered.'
+          message: shouldDispatch ? 'Video uploaded to Gofile. GitHub Action triggered.' : 'Video uploaded to Gofile.'
         });
       } catch (err) {
         console.error('Gofile/dispatch error:', err);

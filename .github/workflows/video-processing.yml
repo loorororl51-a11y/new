@@ -75,7 +75,9 @@ jobs:
           # If 'video' looks like a URL, download it to uploads/
           if echo "$video" | grep -qE '^https?://'; then
             echo "Detected URL. Downloading..."
-            FILE_NAME="downloaded-$(date +%s).mp4"
+            EXT=$(echo "$video" | sed -n 's/.*\(\.mp4\|\.webm\|\.mkv\|\.mov\|\.avi\|\.wmv\|\.flv\)$.*/\1/p')
+            if [ -z "$EXT" ]; then EXT=.mp4; fi
+            FILE_NAME="downloaded-$(date +%s)$EXT"
             curl -L "$video" -o "uploads/$FILE_NAME"
             video="uploads/$FILE_NAME"
           fi

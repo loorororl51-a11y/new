@@ -3,48 +3,31 @@
 class GofileService {
   constructor() {
     this.apiBase = 'https://api.gofile.io';
-  }
-
-  async getBestServer() {
-    const resp = await fetch(`${this.apiBase}/getServer`);
-    if (!resp.ok) throw new Error(`Gofile getServer failed: ${resp.status}`);
-    const data = await resp.json();
-    if (data.status !== 'ok') throw new Error(`Gofile getServer error: ${data.status}`);
-    return data.data.server;
+    this.uploadBase = process.env.GOFILE_UPLOAD_HOST || 'https://upload.gofile.io';
+    this.apiToken = process.env.GOFILE_API_TOKEN; // optional
   }
 
   async uploadAsGuest(filePath) {
     const fs = require('fs');
     const FormData = require('form-data');
-    const server = await this.getBestServer();
     const form = new FormData();
     form.append('file', fs.createReadStream(filePath));
-    const uploadUrl = `https://${server}.gofile.io/uploadFile`;
 
-    const resp = await fetch(uploadUrl, { method: 'POST', body: form });
+    // Official global (or regional) upload endpoint
+    const resp = await fetch(`${this.uploadBase}/uploadfile`, { method: 'POST', body: form });
     if (!resp.ok) throw new Error(`Gofile upload failed: ${resp.status}`);
     const data = await resp.json();
-    if (data.status !== 'ok') throw new Error(`Gofile upload error: ${data.status}`);
-    const code = data.data.code;
-    const directLink = await this.getDirectLink(code).catch(() => null);
+    if (!data || data.status !== 'ok' || !data.data) throw new Error('Gofile upload error');
+
     return {
       downloadPage: data.data.downloadPage,
-      code,
-      parentFolder: data.data.parentFolder,
-      directLink
+      code: data.data.code,
+      parentFolder: data.data.parentFolder
     };
   }
 
-  async getDirectLink(code) {
-    const url = `${this.apiBase}/getContent?contentId=${encodeURIComponent(code)}`;
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`Gofile getContent failed: ${resp.status}`);
-    const data = await resp.json();
-    if (data.status !== 'ok') throw new Error(`Gofile getContent error: ${data.status}`);
-    const contents = data.data.contents || {};
-    const first = Object.values(contents)[0];
-    return first && first.directLink ? first.directLink : null;
-  }
+  // Creating direct links requires an API token and (often) premium account.
+  // Not used by default in guest flow.
 }
 
 module.exports = GofileService;
