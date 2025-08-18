@@ -96,14 +96,42 @@ app.post('/upload', upload.single('video'), async (req, res) => {
     // Notify connected clients about new upload
     wsManager.notifyNewUpload(videoInfo);
 
-    // Start processing
-    processVideo(videoInfo);
+    const processingMode = (process.env.PROCESSING_MODE || 'local').toLowerCase();
 
-    res.json({
-      success: true,
-      videoId: videoInfo.id,
-      message: 'Video uploaded successfully. Processing started.'
-    });
+    if (processingMode === 'github') {
+      // Commit uploaded file to GitHub repo uploads/ folder and let Actions process it
+      const repoUploadPath = `uploads/${videoInfo.filename}`;
+      const commitMessage = `Upload video ${videoInfo.originalName} (id: ${videoInfo.id})`;
+
+      try {
+        await githubService.commitLocalFileToRepo(videoInfo.path, repoUploadPath, commitMessage);
+        // Optionally remove local file after committing
+        await fs.remove(videoInfo.path).catch(() => {});
+
+        wsManager.updateVideoStatus(videoInfo.id, 'processing', 15);
+
+        res.json({
+          success: true,
+          videoId: videoInfo.id,
+          mode: 'github',
+          message: 'Video uploaded. GitHub Action will process it shortly.'
+        });
+      } catch (err) {
+        console.error('GitHub commit error:', err);
+        wsManager.updateVideoStatus(videoInfo.id, 'error', 0, err.message);
+        return res.status(500).json({ success: false, error: 'Failed to push video to GitHub' });
+      }
+    } else {
+      // Local processing path (existing behavior)
+      processVideo(videoInfo);
+
+      res.json({
+        success: true,
+        videoId: videoInfo.id,
+        mode: 'local',
+        message: 'Video uploaded successfully. Processing started.'
+      });
+    }
 
   } catch (error) {
     console.error('Upload error:', error);
@@ -127,6 +155,20 @@ app.get('/status/:videoId', (req, res) => {
 app.get('/videos', (req, res) => {
   const videos = wsManager.getAllVideos();
   res.json(videos);
+});
+
+// Poll for results produced by GitHub Action (or local process committed to repo)
+app.get('/results/:videoId', async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    const result = await githubService.tryGetResultsById(videoId);
+    if (!result) {
+      return res.status(404).json({ success: false, error: 'Results not found yet' });
+    }
+    res.json({ success: true, data: result.json, path: result.path });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 // Test GitHub connection

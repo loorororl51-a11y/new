@@ -105,6 +105,11 @@ async function uploadFile(file) {
         if (result.success) {
             showSuccess(`Video uploaded successfully! Processing started. Video ID: ${result.videoId}`);
             fileInput.value = ''; // Reset file input
+
+            // If using GitHub processing mode, start polling for results from the repository
+            if (result.mode === 'github' && result.videoId) {
+                startPollingResults(result.videoId);
+            }
         } else {
             showError(result.error || 'Upload failed');
         }
@@ -348,6 +353,48 @@ function downloadVideo(videoId) {
         link.click();
         document.body.removeChild(link);
     }
+}
+
+// Poll for GitHub Action results and update UI when ready
+function startPollingResults(videoId) {
+    const pollIntervalMs = 15000; // 15 seconds
+    const maxAttempts = 80; // ~20 minutes
+    let attempts = 0;
+
+    const intervalId = setInterval(async () => {
+        attempts++;
+        try {
+            const resp = await fetch(`/results/${videoId}`);
+            if (resp.ok) {
+                const payload = await resp.json();
+                if (payload && payload.success && payload.data) {
+                    // Support either flat structure or nested under `results`
+                    const data = payload.data.results || payload.data;
+                    const existing = videos.get(videoId) || { id: videoId };
+                    const updated = {
+                        ...existing,
+                        status: 'completed',
+                        progress: 100,
+                        processedVideoUrl: data.videoUrl || existing.processedVideoUrl,
+                        thumbnailUrl: data.thumbnailUrl || existing.thumbnailUrl,
+                        videoParts: data.videoParts || existing.videoParts || []
+                    };
+                    videos.set(videoId, updated);
+                    updateVideoCard(updated);
+                    updateStats();
+                    showSuccess(`Video processing completed!`);
+                    clearInterval(intervalId);
+                }
+            }
+        } catch (e) {
+            // ignore and continue polling
+        }
+
+        if (attempts >= maxAttempts) {
+            clearInterval(intervalId);
+            showError('Timed out waiting for processing results.');
+        }
+    }, pollIntervalMs);
 }
 
 // Join video room for real-time updates

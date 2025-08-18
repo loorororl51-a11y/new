@@ -10,6 +10,7 @@ class GitHubService {
     
     this.owner = process.env.GITHUB_REPO_OWNER;
     this.repo = process.env.GITHUB_REPO_NAME;
+    this.branch = process.env.GITHUB_BRANCH || 'main';
   }
 
   async createIssue(title, body, labels = []) {
@@ -103,28 +104,36 @@ ${error.stack || 'No stack trace available'}
         timestamp: new Date().toISOString()
       }, { spaces: 2 });
 
-      // Get current branch
-      const { data: branch } = await this.octokit.repos.getBranch({
-        owner: this.owner,
-        repo: this.repo,
-        branch: 'main' // or 'master' depending on your default branch
-      });
-
       // Create commit
       const commitMessage = `Add video processing results for ${videoInfo.originalName}`;
-      
+      const repoPath = `results/video-${videoInfo.id}-results.json`;
+
       // Read the file content
       const fileContent = await fs.readFile(resultsFile, 'utf8');
-      
+
+      // Determine if file exists to include sha for updates
+      let sha = undefined;
+      try {
+        const { data } = await this.octokit.repos.getContent({
+          owner: this.owner,
+          repo: this.repo,
+          path: repoPath,
+          ref: this.branch
+        });
+        if (data && data.sha) sha = data.sha;
+      } catch (e) {
+        // 404 means file does not exist; proceed without sha
+      }
+
       // Create or update file in repository
       await this.octokit.repos.createOrUpdateFileContents({
         owner: this.owner,
         repo: this.repo,
-        path: `results/video-${videoInfo.id}-results.json`,
+        path: repoPath,
         message: commitMessage,
         content: Buffer.from(fileContent).toString('base64'),
-        branch: 'main', // or 'master'
-        sha: branch.commit.sha
+        branch: this.branch,
+        ...(sha ? { sha } : {})
       });
 
       console.log(`Results committed to GitHub for video ${videoInfo.id}`);
@@ -235,7 +244,8 @@ ${error.stack || 'No stack trace available'}
         path: filePath,
         message: message,
         content: Buffer.from(content).toString('base64'),
-        sha: sha
+        branch: this.branch,
+        ...(sha ? { sha } : {})
       });
       
       console.log(`File ${filePath} updated`);
@@ -244,6 +254,60 @@ ${error.stack || 'No stack trace available'}
       console.error('Error updating file:', error);
       throw error;
     }
+  }
+
+  // Create or update a file using a local path into the repository (e.g., uploads/ folder)
+  async commitLocalFileToRepo(localFilePath, repoPath, commitMessage) {
+    try {
+      const contentBuffer = await fs.readFile(localFilePath);
+      let sha = undefined;
+      try {
+        const { data } = await this.octokit.repos.getContent({
+          owner: this.owner,
+          repo: this.repo,
+          path: repoPath,
+          ref: this.branch
+        });
+        if (data && data.sha) sha = data.sha;
+      } catch (e) {
+        // File does not exist yet
+      }
+
+      const response = await this.octokit.repos.createOrUpdateFileContents({
+        owner: this.owner,
+        repo: this.repo,
+        path: repoPath,
+        message: commitMessage,
+        content: contentBuffer.toString('base64'),
+        branch: this.branch,
+        ...(sha ? { sha } : {})
+      });
+
+      return response.data;
+    } catch (error) {
+      console.error('Error committing local file to repo:', error);
+      throw error;
+    }
+  }
+
+  // Try to fetch a JSON results file committed by the pipeline
+  async tryGetResultsById(videoId) {
+    const candidatePaths = [
+      `results/video-${videoId}-results.json`,
+      `results/${videoId}.json`
+    ];
+
+    for (const p of candidatePaths) {
+      try {
+        const content = await this.getFileContent(p);
+        if (content) {
+          return { path: p, json: JSON.parse(content) };
+        }
+      } catch (e) {
+        // continue
+      }
+    }
+    return null;
   }
 
   formatFileSize(bytes) {

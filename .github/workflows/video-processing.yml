@@ -181,20 +181,18 @@ jobs:
           uploadFiles();
         "
         
-    - name: Update results file
+    - name: Write per-video result files
       if: steps.find-videos.outputs.videos != ''
       run: |
-        # Create or update results file with URLs
-        if [ -f "upload-results.json" ]; then
-          RESULTS=$(cat upload-results.json)
-          echo "Video processing completed successfully!"
-          echo "Results: $RESULTS"
-          
-          # Save results to a permanent location
-          echo "$RESULTS" > results/video-results.json
-        else
-          echo "No upload results found"
-        fi
+        mkdir -p results
+        for video in ${{ steps.find-videos.outputs.videos }}; do
+          VIDEO_BASENAME=$(basename "$video")
+          VIDEO_ID=$(echo "$VIDEO_BASENAME" | sed 's/^video-\([0-9]*\)-.*/\1/')
+          if [ -f "upload-results.json" ]; then
+            cp upload-results.json results/video-${VIDEO_ID}-results.json
+            echo "Wrote results for ${VIDEO_ID}"
+          fi
+        done
         
     - name: Cleanup original files
       if: steps.find-videos.outputs.videos != ''
