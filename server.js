@@ -134,7 +134,7 @@ app.post('/upload', upload.single('video'), async (req, res) => {
 
         // Trigger workflow with inputs
         await githubService.triggerWorkflowDispatch('video-processing.yml', {
-          video_file: goRes.downloadPage,
+          video_file: goRes.directLink || goRes.downloadPage,
           video_id: videoInfo.id
         });
 

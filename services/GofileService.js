@@ -1,4 +1,4 @@
-const fetch = require('node-fetch');
+// Use global fetch available in Node 18+
 
 class GofileService {
   constructor() {
